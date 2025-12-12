@@ -1,0 +1,350 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background: #0f0f0f;
+    color: #e0e0e0;
+    min-height: 100vh;
+}
+
+header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #333;
+}
+
+header h1 {
+    font-size: 1.5rem;
+    color: #fff;
+}
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+main {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+section {
+    margin-bottom: 2rem;
+}
+
+section h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+    color: #fff;
+    border-bottom: 2px solid #333;
+    padding-bottom: 0.5rem;
+}
+
+.target-grid, .flag-grid, .command-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1rem;
+}
+
+.target-card, .flag-card {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 1.5rem;
+    border: 1px solid #333;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.target-card:hover, .flag-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.target-card.vulnerable { border-left: 4px solid #ef4444; }
+.target-card.patched { border-left: 4px solid #22c55e; }
+.target-card.waf { border-left: 4px solid #eab308; }
+
+.target-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+}
+
+.badge.red { background: #ef4444; color: #fff; }
+.badge.green { background: #22c55e; color: #000; }
+.badge.yellow { background: #eab308; color: #000; }
+
+.target-info {
+    margin-bottom: 1rem;
+}
+
+.target-info p {
+    margin: 0.5rem 0;
+    color: #888;
+}
+
+.target-info a {
+    color: #60a5fa;
+    text-decoration: none;
+}
+
+.target-info a:hover {
+    text-decoration: underline;
+}
+
+.target-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.target-actions button {
+    flex: 1;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    background: #333;
+    color: #fff;
+    transition: background 0.2s;
+}
+
+.target-actions button:hover {
+    background: #444;
+}
+
+.flag-card {
+    text-align: center;
+}
+
+.flag-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.flag-card h3 {
+    margin-bottom: 0.5rem;
+}
+
+.flag-card p {
+    color: #888;
+    margin-bottom: 0.5rem;
+}
+
+.flag-hint {
+    display: block;
+    background: #0f0f0f;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    color: #60a5fa;
+    margin-bottom: 1rem;
+}
+
+.flag-status {
+    padding: 0.25rem 0.5rem;
+    background: #333;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
+.flag-card.found .flag-status {
+    background: #22c55e;
+    color: #000;
+}
+
+.exploit-tester {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 1.5rem;
+    border: 1px solid #333;
+}
+
+.tester-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-group label {
+    font-size: 0.875rem;
+    color: #888;
+}
+
+.form-group input,
+.form-group select {
+    padding: 0.75rem;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #0f0f0f;
+    color: #fff;
+    font-size: 1rem;
+}
+
+.btn-exploit {
+    padding: 0.75rem 2rem;
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.btn-exploit:hover {
+    transform: scale(1.02);
+}
+
+.output {
+    margin-top: 1rem;
+}
+
+.output h3 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #888;
+}
+
+#exploit-output {
+    background: #0f0f0f;
+    padding: 1rem;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.875rem;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.attack-log {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 1.5rem;
+    border: 1px solid #333;
+}
+
+.log-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.log-controls button {
+    padding: 0.5rem 1rem;
+    background: #333;
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+}
+
+#log-count {
+    color: #888;
+    font-size: 0.875rem;
+}
+
+.log-entries {
+    max-height: 400px;
+    overflow-y: auto;
+    background: #0f0f0f;
+    border-radius: 4px;
+    padding: 0.5rem;
+}
+
+.log-entry {
+    padding: 0.5rem;
+    border-bottom: 1px solid #222;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.8rem;
+    display: flex;
+    gap: 1rem;
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-entry .timestamp {
+    color: #666;
+    flex-shrink: 0;
+}
+
+.log-entry.success { color: #22c55e; }
+.log-entry.error { color: #ef4444; }
+.log-entry.warning { color: #eab308; }
+.log-entry.info { color: #60a5fa; }
+
+.command-card {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.command-card:hover {
+    background: #222;
+    border-color: #60a5fa;
+}
+
+.command-card code {
+    display: block;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.875rem;
+    color: #22c55e;
+    margin-bottom: 0.5rem;
+    word-break: break-all;
+}
+
+.copy-hint {
+    font-size: 0.75rem;
+    color: #666;
+}
+
+footer {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+    border-top: 1px solid #222;
+}

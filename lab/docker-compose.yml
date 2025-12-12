@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # Vulnerable Next.js application (React 19.2.0, Next.js 15.4.0)
+  vulnerable:
+    build:
+      context: ./vulnerable
+      dockerfile: Dockerfile
+    container_name: react2shell-vulnerable
+    ports:
+      - "3011:3000"
+    environment:
+      - NODE_ENV=production
+      - FLAG_1=FLAG{3nv_v4rs_4r3_n0t_s4f3_2025}
+    networks:
+      - lab-network
+    restart: unless-stopped
+    labels:
+      - "lab.type=vulnerable"
+      - "lab.cve=CVE-2025-55182"
+
+  # Patched Next.js application (React 19.2.1, Next.js 15.4.8)
+  patched:
+    build:
+      context: ./patched
+      dockerfile: Dockerfile
+    container_name: react2shell-patched
+    ports:
+      - "3012:3000"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - lab-network
+    restart: unless-stopped
+    labels:
+      - "lab.type=patched"
+      - "lab.cve=CVE-2025-55182"
+
+  # WAF (ModSecurity + nginx) protecting vulnerable instance
+  waf:
+    build:
+      context: ./waf
+      dockerfile: Dockerfile
+    container_name: react2shell-waf
+    ports:
+      - "3013:8080"
+    environment:
+      - BACKEND=http://vulnerable:3000
+      - PORT=8080
+      - MODSEC_RULE_ENGINE=On
+      - PARANOIA=1
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+    depends_on:
+      - vulnerable
+    networks:
+      - lab-network
+    restart: unless-stopped
+    labels:
+      - "lab.type=waf"
+      - "lab.cve=CVE-2025-55182"
+
+  # Logging dashboard
+  dashboard:
+    build:
+      context: ./logging
+      dockerfile: Dockerfile
+    container_name: react2shell-dashboard
+    ports:
+      - "8080:80"
+    networks:
+      - lab-network
+    restart: unless-stopped
+    labels:
+      - "lab.type=dashboard"
+
+networks:
+  lab-network:
+    driver: bridge
+    name: react2shell-lab

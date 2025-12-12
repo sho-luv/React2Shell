@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { width: 380px; margin: 0; font-family: 'Segoe UI', sans-serif; background: #f4f6f8; color: #333; }
+        .header { background: #2c3e50; color: #fff; padding: 10px 15px; font-weight: 600; font-size: 14px; border-bottom: 3px solid #e74c3c; display: flex; justify-content: space-between; align-items: center; }
+        .header-title { display: flex; align-items: center; gap: 8px; }
+        .version { font-size: 10px; opacity: 0.7; font-weight: normal; }
+
+        .container { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+
+        /* Toggle switch */
+        .toggle-container { display: flex; align-items: center; gap: 6px; }
+        .toggle { position: relative; width: 36px; height: 20px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #95a5a6; border-radius: 20px; transition: 0.3s; }
+        .toggle-slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: 0.3s; }
+        .toggle input:checked + .toggle-slider { background-color: #27ae60; }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(16px); }
+        .toggle-label { font-size: 11px; color: #fff; }
+
+        /* Card styles */
+        .card { background: #fff; border: 1px solid #dce1e7; border-radius: 6px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .card.disabled { opacity: 0.5; pointer-events: none; }
+        .card-title { background: #eaeff2; padding: 8px 12px; font-size: 11px; font-weight: 700; color: #57606f; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #dce1e7; display: flex; justify-content: space-between; align-items: center; }
+        .card-body { padding: 10px 12px; font-size: 12px; }
+
+        /* Status badges */
+        .badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; color: #fff; font-weight: 600; }
+        .badge.gray { background: #95a5a6; }
+        .badge.green { background: #27ae60; }
+        .badge.red { background: #c0392b; }
+        .badge.orange { background: #e67e22; }
+
+        /* Lists */
+        ul { margin: 0; padding-left: 18px; line-height: 1.5; color: #2c3e50; }
+        li { margin-bottom: 2px; }
+
+        /* Input groups */
+        .input-group { display: flex; margin-bottom: 8px; }
+        .input-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .input-field { flex: 1; }
+        .input-field label { display: block; font-size: 10px; color: #7f8c8d; margin-bottom: 3px; text-transform: uppercase; }
+        input[type="text"] { width: 100%; padding: 6px; border: 1px solid #bdc3c7; border-radius: 4px; font-family: monospace; font-size: 11px; outline: none; box-sizing: border-box; }
+        input[type="text"]:focus { border-color: #3498db; }
+
+        /* Buttons */
+        button { border: none; cursor: pointer; color: #fff; font-weight: 600; transition: 0.2s; padding: 8px; font-size: 11px; }
+        .btn-scan { background: #3498db; width: 100%; border-radius: 4px; }
+        .btn-scan:hover { background: #2980b9; }
+        .btn-scan:disabled { background: #95a5a6; cursor: not-allowed; }
+
+        .btn-exploit { background: #e74c3c; width: 100%; border-radius: 4px; margin-top: 8px; }
+        .btn-exploit:hover { background: #c0392b; }
+        .btn-exploit:disabled { background: #95a5a6; cursor: not-allowed; }
+
+        .btn-small { padding: 4px 8px; font-size: 10px; border-radius: 3px; }
+        .btn-copy { background: #7f8c8d; }
+        .btn-copy:hover { background: #6c7a7d; }
+        .btn-copy.copied { background: #27ae60; }
+
+        /* Result areas */
+        .result-box { margin-top: 8px; border-top: 1px dashed #eee; padding-top: 8px; display: none; }
+        .console-out { background: #2d3436; color: #00cec9; padding: 8px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 11px; margin-top: 5px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; position: relative; }
+        .console-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+
+        /* Confirmation dialog */
+        .confirm-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 100; }
+        .confirm-dialog { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 15px; border-radius: 8px; width: 280px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .confirm-title { font-weight: 700; color: #e74c3c; margin-bottom: 10px; font-size: 13px; }
+        .confirm-text { font-size: 11px; color: #666; margin-bottom: 15px; line-height: 1.4; }
+        .confirm-buttons { display: flex; gap: 8px; }
+        .btn-cancel { background: #95a5a6; flex: 1; }
+        .btn-confirm { background: #e74c3c; flex: 1; }
+
+        /* Settings section */
+        .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; }
+        .settings-row:last-child { border-bottom: none; }
+        .settings-label { font-size: 11px; color: #555; }
+
+        /* Checkbox */
+        .checkbox-container { display: flex; align-items: center; gap: 5px; }
+        input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+
+        /* Score display */
+        .score { font-size: 10px; color: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-title">
+            React2Shell
+            <span class="version">v2.0</span>
+        </div>
+        <div class="toggle-container">
+            <label class="toggle">
+                <input type="checkbox" id="masterToggle" checked>
+                <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-label">Enabled</span>
+        </div>
+    </div>
+
+    <div class="container" id="mainContainer">
+        <!-- Passive Detection -->
+        <div class="card" id="passiveCard">
+            <div class="card-title">
+                1. Passive Detection
+                <span id="passive-badge" class="badge gray">SCANNING</span>
+            </div>
+            <div class="card-body">
+                <ul id="passive-list"><li>Waiting for page...</li></ul>
+                <div id="passive-score" class="score"></div>
+            </div>
+        </div>
+
+        <!-- Active Fingerprint -->
+        <div class="card" id="fingerprintCard">
+            <div class="card-title">2. Active Fingerprint (RSC:1)</div>
+            <div class="card-body">
+                <button id="btnFingerprint" class="btn-scan">Start Fingerprint Probe</button>
+                <div id="fingerprint-result" class="result-box">
+                    <ul id="active-list"></ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- RCE Exploit -->
+        <div class="card" id="exploitCard" style="border-color: #fab1a0;">
+            <div class="card-title" style="background: #fff0eb; color: #c0392b;">3. RCE Exploit (CVE-2025-55182)</div>
+            <div class="card-body">
+                <div class="input-row">
+                    <div class="input-field" style="flex: 1;">
+                        <label>Exploit Path</label>
+                        <input type="text" id="pathInput" placeholder="/adfa" value="/adfa">
+                    </div>
+                </div>
+                <div class="input-field">
+                    <label>Command</label>
+                    <input type="text" id="cmdInput" placeholder="whoami" value="whoami">
+                </div>
+                <button id="btnExploit" class="btn-exploit">Execute Exploit</button>
+                <div id="exploit-status" style="font-size: 10px; color: #7f8c8d; display:none; margin-top: 8px;">Sending payload...</div>
+                <div id="exploit-result" class="result-box">
+                    <div class="console-header">
+                        <span style="font-size: 10px; color: #7f8c8d;">OUTPUT</span>
+                        <button id="btnCopy" class="btn-small btn-copy">Copy</button>
+                    </div>
+                    <div id="rce-output" class="console-out"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings -->
+        <div class="card">
+            <div class="card-title">Settings</div>
+            <div class="card-body">
+                <div class="settings-row">
+                    <span class="settings-label">Confirm before exploit</span>
+                    <div class="checkbox-container">
+                        <input type="checkbox" id="confirmExploit" checked>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Dialog -->
+    <div class="confirm-overlay" id="confirmOverlay">
+        <div class="confirm-dialog">
+            <div class="confirm-title">Confirm Exploit Execution</div>
+            <div class="confirm-text">
+                You are about to execute a remote command on the target server.
+                Only proceed if you have authorization to test this system.
+                <br><br>
+                <strong>Target:</strong> <span id="confirmTarget"></span><br>
+                <strong>Command:</strong> <span id="confirmCmd"></span>
+            </div>
+            <div class="confirm-buttons">
+                <button class="btn-cancel" id="btnCancelExploit">Cancel</button>
+                <button class="btn-confirm" id="btnConfirmExploit">Execute</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

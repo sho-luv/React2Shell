@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE-2025-55182 Lab Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>CVE-2025-55182 Lab Dashboard</h1>
+        <div class="status">
+            <span class="indicator"></span>
+            <span id="connection-status">Connecting...</span>
+        </div>
+    </header>
+
+    <main>
+        <section class="targets">
+            <h2>Lab Targets</h2>
+            <div class="target-grid">
+                <div class="target-card vulnerable">
+                    <div class="target-header">
+                        <span class="badge red">VULNERABLE</span>
+                        <h3>Vulnerable Instance</h3>
+                    </div>
+                    <div class="target-info">
+                        <p><strong>URL:</strong> <a href="http://localhost:3011" target="_blank">http://localhost:3011</a></p>
+                        <p><strong>React:</strong> 19.2.0</p>
+                        <p><strong>Next.js:</strong> 15.4.0</p>
+                    </div>
+                    <div class="target-actions">
+                        <button onclick="testTarget('http://localhost:3011')">Test Vulnerability</button>
+                        <button onclick="window.open('http://localhost:3011', '_blank')">Open App</button>
+                    </div>
+                </div>
+
+                <div class="target-card patched">
+                    <div class="target-header">
+                        <span class="badge green">PATCHED</span>
+                        <h3>Patched Instance</h3>
+                    </div>
+                    <div class="target-info">
+                        <p><strong>URL:</strong> <a href="http://localhost:3012" target="_blank">http://localhost:3012</a></p>
+                        <p><strong>React:</strong> 19.2.1</p>
+                        <p><strong>Next.js:</strong> 15.4.8</p>
+                    </div>
+                    <div class="target-actions">
+                        <button onclick="testTarget('http://localhost:3012')">Test Vulnerability</button>
+                        <button onclick="window.open('http://localhost:3012', '_blank')">Open App</button>
+                    </div>
+                </div>
+
+                <div class="target-card waf">
+                    <div class="target-header">
+                        <span class="badge yellow">WAF</span>
+                        <h3>WAF Protected</h3>
+                    </div>
+                    <div class="target-info">
+                        <p><strong>URL:</strong> <a href="http://localhost:3013" target="_blank">http://localhost:3013</a></p>
+                        <p><strong>Backend:</strong> Vulnerable</p>
+                        <p><strong>Protection:</strong> ModSecurity</p>
+                    </div>
+                    <div class="target-actions">
+                        <button onclick="testTarget('http://localhost:3013')">Test WAF Bypass</button>
+                        <button onclick="window.open('http://localhost:3013', '_blank')">Open App</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="ctf">
+            <h2>CTF Flags</h2>
+            <div class="flag-grid">
+                <div class="flag-card" id="flag1">
+                    <div class="flag-icon">🚩</div>
+                    <h3>Flag 1</h3>
+                    <p>Environment Variables</p>
+                    <code class="flag-hint">Hint: env | grep FLAG</code>
+                    <div class="flag-status">Not Found</div>
+                </div>
+                <div class="flag-card" id="flag2">
+                    <div class="flag-icon">🚩</div>
+                    <h3>Flag 2</h3>
+                    <p>Root Flag</p>
+                    <code class="flag-hint">Hint: cat /root/flag.txt</code>
+                    <div class="flag-status">Not Found</div>
+                </div>
+                <div class="flag-card" id="flag3">
+                    <div class="flag-icon">🚩</div>
+                    <h3>Flag 3</h3>
+                    <p>Secret Directory</p>
+                    <code class="flag-hint">Hint: cat /app/secret/flag.txt</code>
+                    <div class="flag-status">Not Found</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="exploit-tester">
+            <h2>Exploit Tester</h2>
+            <div class="tester-form">
+                <div class="form-group">
+                    <label for="target-url">Target URL:</label>
+                    <select id="target-url">
+                        <option value="http://localhost:3011">Vulnerable (3011)</option>
+                        <option value="http://localhost:3012">Patched (3012)</option>
+                        <option value="http://localhost:3013">WAF Protected (3013)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="command">Command:</label>
+                    <input type="text" id="command" placeholder="id" value="id">
+                </div>
+                <div class="form-group">
+                    <label for="payload-type">Payload Type:</label>
+                    <select id="payload-type">
+                        <option value="standard">Standard</option>
+                        <option value="waf-bypass">WAF Bypass (Junk Padding)</option>
+                        <option value="encoded">URL Encoded</option>
+                    </select>
+                </div>
+                <button onclick="runExploit()" class="btn-exploit">Run Exploit</button>
+            </div>
+            <div class="output">
+                <h3>Output</h3>
+                <pre id="exploit-output">Ready to test...</pre>
+            </div>
+        </section>
+
+        <section class="attack-log">
+            <h2>Attack Log</h2>
+            <div class="log-controls">
+                <button onclick="clearLogs()">Clear Logs</button>
+                <span id="log-count">0 entries</span>
+            </div>
+            <div class="log-entries" id="log-entries">
+                <div class="log-entry info">
+                    <span class="timestamp">--:--:--</span>
+                    <span class="message">Dashboard initialized. Ready to log attacks.</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="tools">
+            <h2>Quick Commands</h2>
+            <div class="command-grid">
+                <div class="command-card" onclick="copyCommand('python react2shell.py http://localhost:3011 -c &quot;id&quot;')">
+                    <code>python react2shell.py http://localhost:3011 -c "id"</code>
+                    <span class="copy-hint">Click to copy</span>
+                </div>
+                <div class="command-card" onclick="copyCommand('python react2shell.py http://localhost:3011 -c &quot;cat /root/flag.txt&quot;')">
+                    <code>python react2shell.py http://localhost:3011 -c "cat /root/flag.txt"</code>
+                    <span class="copy-hint">Click to copy</span>
+                </div>
+                <div class="command-card" onclick="copyCommand('python react2shell.py http://localhost:3011 -c &quot;env | grep FLAG&quot;')">
+                    <code>python react2shell.py http://localhost:3011 -c "env | grep FLAG"</code>
+                    <span class="copy-hint">Click to copy</span>
+                </div>
+                <div class="command-card" onclick="copyCommand('python react2shell.py http://localhost:3013 -c &quot;id&quot; --waf-bypass')">
+                    <code>python react2shell.py http://localhost:3013 -c "id" --waf-bypass</code>
+                    <span class="copy-hint">Click to copy (WAF Bypass)</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>CVE-2025-55182 React Server Components RCE Lab | For authorized security testing only</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
