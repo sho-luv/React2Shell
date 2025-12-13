@@ -3,13 +3,8 @@
 React2Shell - CVE-2025-55182 Scanner & Exploit
 Next.js/React Server Components RCE via Prototype Pollution
 
-Combines functionality from:
-- assetnote/react2shell-scanner
-- Chocapikk/CVE-2025-55182
-- mrknow001/RSC_Detector
-- hackersatyamrastogi/react2shell-ultimate
-
 Author: sho-luv
+https://github.com/sho-luv/React2Shell
 """
 
 import argparse
