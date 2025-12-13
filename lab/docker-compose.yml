@@ -9,6 +9,7 @@ services:
     container_name: react2shell-vulnerable
     ports:
       - "3011:3000"
+      - "1337:1337"  # Webshell backdoor port
     environment:
       - NODE_ENV=production
       - FLAG_1=FLAG{3nv_v4rs_4r3_n0t_s4f3_2025}

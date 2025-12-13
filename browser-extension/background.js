@@ -49,7 +49,7 @@ async function disableHeaderRules() {
 async function getSettings() {
     const defaults = {
         enabled: true,
-        exploitPath: "/adfa",
+        exploitPath: "/",
         confirmExploit: true
     };
     const stored = await chrome.storage.local.get(defaults);
