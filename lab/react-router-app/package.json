@@ -1,0 +1,15 @@
+{
+  "name": "react2shell-react-router-lab",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --conditions react-server server.js"
+  },
+  "dependencies": {
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-server-dom-webpack": "19.2.0",
+    "express": "^4.18.2",
+    "busboy": "^1.6.0"
+  }
+}

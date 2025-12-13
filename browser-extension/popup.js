@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.runtime.sendMessage({ action: "get_settings" }, (settings) => {
         if (settings) {
             el.masterToggle.checked = settings.enabled !== false;
-            el.pathInput.value = settings.exploitPath || "/adfa";
+            el.pathInput.value = settings.exploitPath || "/";
             el.confirmExploit.checked = settings.confirmExploit !== false;
             updateEnabledState();
         }
@@ -92,7 +92,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // Get current tab
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         currentTabId = tabs[0].id;
-        currentDomain = new URL(tabs[0].url).hostname;
+
+        // Handle non-HTTP URLs (chrome://, file://, etc.)
+        try {
+            const url = new URL(tabs[0].url);
+            if (!url.protocol.startsWith('http')) {
+                el.passiveBadge.innerText = "N/A";
+                el.passiveBadge.className = "badge orange";
+                el.passiveList.innerHTML = "<li>Extension only works on HTTP/HTTPS pages</li>";
+                el.btnFinger.disabled = true;
+                el.btnExploit.disabled = true;
+                return;
+            }
+            currentDomain = url.hostname;
+        } catch (e) {
+            el.passiveBadge.innerText = "ERROR";
+            el.passiveBadge.className = "badge orange";
+            el.passiveList.innerHTML = "<li>Invalid URL</li>";
+            el.btnFinger.disabled = true;
+            el.btnExploit.disabled = true;
+            return;
+        }
 
         // Initialize passive scan display
         chrome.tabs.sendMessage(currentTabId, { action: "get_passive" }, (res) => {

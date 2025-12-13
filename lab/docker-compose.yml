@@ -60,6 +60,42 @@ services:
       - "lab.type=waf"
       - "lab.cve=CVE-2025-55182"
 
+  # Vulnerable Waku application (Waku 0.27.1, React 19.2.0)
+  waku:
+    build:
+      context: ./waku-app
+      dockerfile: Dockerfile
+    container_name: react2shell-waku
+    ports:
+      - "3014:8080"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - lab-network
+    restart: unless-stopped
+    labels:
+      - "lab.type=vulnerable"
+      - "lab.framework=waku"
+      - "lab.cve=CVE-2025-55182"
+
+  # Vulnerable React Router application (React Router 7.5.0, React 19.2.0)
+  react-router:
+    build:
+      context: ./react-router-app
+      dockerfile: Dockerfile
+    container_name: react2shell-react-router
+    ports:
+      - "3015:3000"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - lab-network
+    restart: unless-stopped
+    labels:
+      - "lab.type=vulnerable"
+      - "lab.framework=react-router"
+      - "lab.cve=CVE-2025-55182"
+
   # Logging dashboard
   dashboard:
     build:

